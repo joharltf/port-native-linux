@@ -1,0 +1,323 @@
+REFERENSI MANUAL (tidak perlu jika memakai jalur otomatis: lihat README.md).
+File yang disebut di sini (AGENTS_v7, zen_free_sync, dst.) ada di folder repo; install.sh memasangnya.
+
+=====================================================================
+LANGKAH DARI NOL v7 - PORT GAME WII (DAN KONSOL LAIN) DENGAN OPENCODE
+Asumsi: Linux (Ubuntu/Debian) sudah terpasang, pakai terminal.
+File pendamping: AGENTS_v7.txt (otak) dan zen_free_sync.py
+(konfigurasi model otomatis).
+Perubahan dari v5 (v7 = ringan): SEJAK AWAL memakai model GRATIS OpenCode Zen, tanpa
+akun dan tanpa API key. Config model, fallback, dan izin edit dibuat
+otomatis oleh zen_free_sync.py.
+=====================================================================
+
+---------------------------------------------------------------------
+LANGKAH 0 - CEK KOMPUTER
+---------------------------------------------------------------------
+  lsb_release -a        (harus Ubuntu/Debian)
+  uname -m              (harus x86_64)
+  free -h               (RAM minimal 16 GB; 32 GB lebih nyaman)
+  df -h ~               (ruang kosong minimal 150 GB)
+  nproc                 (makin banyak core makin cepat build)
+Pastikan internet aktif.
+
+---------------------------------------------------------------------
+LANGKAH 1 - UPDATE SISTEM + PAKET DASAR (MANUAL, SEKALI)
+---------------------------------------------------------------------
+Lakukan sendiri agar tidak terhambat password sudo di dalam agent:
+
+  sudo apt update && sudo apt upgrade -y
+  sudo apt install -y build-essential git curl wget unzip p7zip-full \
+    python3 python3-pip python3-venv cmake ninja-build clang lld \
+    pkg-config libsdl2-dev libvulkan-dev vulkan-tools \
+    libgl1-mesa-dev openjdk-21-jdk ripgrep jq flatpak \
+    file xxd binutils
+
+Jika "openjdk-21-jdk" tidak ditemukan, ganti dengan openjdk-17-jdk.
+Cek: git --version ; cmake --version ; java -version
+
+---------------------------------------------------------------------
+LANGKAH 2 - MODEL: ZEN GRATIS (TANPA AKUN, TANPA API KEY)
+---------------------------------------------------------------------
+OpenCode menyertakan model gratis (id berakhiran "-free", misalnya
+opencode/xxx-free, atau tertera $0 di /models). Tidak perlu daftar.
+
+Yang perlu Anda tahu:
+- Daftar model gratis BERGANTI-GANTI (banyak yang "limited time").
+  Karena itu config dibuat otomatis dan bisa disegarkan kapan saja.
+- Kuota gratis dibatasi per IP dan dipakai bersama: kadang muncul
+  "Rate limit exceeded". Ditangani oleh fallback otomatis (Langkah 6).
+- Selama masa gratis, prompt/hasil bisa dipakai tim model untuk
+  memperbaiki model. JANGAN kirim password, API key, atau data
+  pribadi ke sesi OpenCode.
+- Kualitas lebih rendah dari model berbayar: kerjakan tugas kecil.
+(Nanti, jika perlu model lebih kuat: OpenCode Go atau Zen berbayar,
+dipasang dengan /connect. Tidak diperlukan untuk memulai.)
+
+---------------------------------------------------------------------
+LANGKAH 3 - INSTALL OPENCODE
+---------------------------------------------------------------------
+  curl -fsSL https://opencode.ai/install | bash
+
+Tutup lalu buka lagi terminal, kemudian cek:
+  opencode --version
+
+Jika "command not found": ikuti petunjuk di opencode.ai/docs
+(biasanya menambahkan folder install ke PATH di ~/.bashrc, lalu
+`source ~/.bashrc`). Alternatif jika sudah punya Node.js:
+  npm install -g opencode-ai
+
+---------------------------------------------------------------------
+LANGKAH 4 - FOLDER KERJA + .gitignore
+---------------------------------------------------------------------
+  mkdir -p ~/port/dumps
+  mkdir -p ~/.config/opencode
+  cd ~/port
+  git init
+  cat > .gitignore << 'GI'
+dumps/
+tools/
+.venv/
+*.iso
+*.rvz
+*.wbfs
+*.ciso
+*.gcm
+*.dol
+*.rel
+*.xbe
+*.xex
+games/*/*/orig/
+games/*/*/extract/
+games/*/*/assets/
+games/*/*/build/
+GI
+  git add .gitignore && git commit -m "gitignore awal"
+
+---------------------------------------------------------------------
+LANGKAH 5 - PASANG OTAK PERMANEN
+---------------------------------------------------------------------
+  cp ~/Downloads/AGENTS_v7.txt ~/.config/opencode/AGENTS.md
+  (ganti ~/Downloads dengan folder tempat file diunduh)
+
+File ini terbaca otomatis di setiap sesi. Cek:
+  head -5 ~/.config/opencode/AGENTS.md
+
+Salin juga FASE_v7.txt sebagai ~/.config/opencode/FASE.md, serta
+port_mem.py dan port_doc.py ke ~/.config/opencode/ lengkap dengan
+wrapper `pmem` dan `pdoc` (lihat PERINTAH_AI_DARI_NOL.txt, Perintah 1).
+Catatan: AGENTS v7 sudah ringan (sekitar 4,5 KB); panduan fase ada
+di FASE.md dan dibaca per bagian lewat `pdoc`.
+
+---------------------------------------------------------------------
+LANGKAH 6 - KONFIGURASI MODEL OTOMATIS (zen_free_sync.py)
+---------------------------------------------------------------------
+Skrip ini mengambil daftar model gratis terbaru dari Zen, memilih
+sampai 4 model, lalu menulis ~/.config/opencode/opencode.json:
+  - model / small_model : model gratis terbaik dan kedua
+  - permission          : edit dan perintah shell otomatis; hapus
+                          paksa ditolak; sudo dan git push bertanya
+  - plugin              : ganti model otomatis saat rate limit
+                          (A -> B -> C -> D), model utama dipakai lagi
+                          setelah cooldown
+Config lama dicadangkan dulu (.bak-waktu) dan isi yang sudah ada
+(tema, plugin lain, izin Anda) tidak ditimpa.
+
+  cp ~/Downloads/zen_free_sync.py ~/.config/opencode/
+  python3 ~/.config/opencode/zen_free_sync.py --dry-run   # lihat dulu
+  python3 ~/.config/opencode/zen_free_sync.py             # tulis
+
+Permudah pemanggilan: buat skrip ~/.local/bin/zensync (bukan alias;
+alias tidak jalan di shell agent), isinya dua baris:
+  #!/bin/sh
+  exec python3 "$HOME/.config/opencode/zen_free_sync.py" "$@"
+lalu chmod +x, dan pastikan ~/.local/bin ada di PATH (~/.bashrc).
+
+Kapan menjalankan ulang `zensync`:
+  - model gratis hilang/diganti ("model not found")
+  - rate limit makin sering
+  - sekitar seminggu sekali
+Opsi berguna:
+  --max 3                      rantai lebih pendek
+  --prefer glm,deepseek,kimi   atur urutan prioritas (kata kunci)
+  --project                    tulis ./opencode.json (per proyek)
+  --no-plugin                  tanpa fallback otomatis
+
+Catatan:
+- Urutan prioritas adalah tebakan berdasarkan nama model, bukan
+  benchmark. Ubah dengan --prefer, atau pilih manual lewat /models.
+- Jika skrip gagal (internet mati, dsb.), config TIDAK diubah.
+  Cadangan: buka OpenCode, /models, pilih model berlabel free.
+- Plugin fallback adalah plugin komunitas (@renjfk/opencode-model-
+  fallback), bukan resmi. Satu entri mappings = satu cadangan, jadi
+  skrip menulis rantai berantai. Cek README plugin jika perilakunya
+  tidak sesuai; alternatifnya plugin opencode-fallback (youngbinkim0).
+- Karena pesan terakhir diulang oleh model cadangan, semua tool
+  `port` harus idempotent (aturan M3 di AGENTS_v7.txt).
+- Hasil skrip sudah saya uji dengan data contoh, tetapi format
+  respons Zen yang sebenarnya belum diuji dari sini. Jika hasilnya
+  "Tidak ada model gratis terdeteksi", pilih manual lewat /models.
+
+---------------------------------------------------------------------
+LANGKAH 7 - CEK MODEL
+---------------------------------------------------------------------
+  cd ~/port
+  opencode
+
+Di dalam OpenCode:
+  /models   -> pastikan model gratis hasil skrip terpilih; jika
+               perlu ganti manual (pilih yang berlabel free).
+Tes cepat: kirim "balas OK". Jika menjawab, siap.
+Jika "No free models": jalankan `opencode upgrade`, cek internet.
+
+---------------------------------------------------------------------
+LANGKAH 8 - BANGUN CORE TOOLKIT (SEKALI, SEMUA KONSOL)
+---------------------------------------------------------------------
+Tahap ini memakai token paling banyak. Kerjakan PER POTONGAN, bukan
+sekaligus (jauh lebih tahan terhadap limit dan model gratis yang lemah).
+Saat model berganti otomatis di tengah tugas, itu normal: pesan
+terakhir diulang oleh model cadangan.
+
+  Potongan 1: "Jalankan Fase 0 saja. Workspace ~/port. Laporan <= 10 baris."
+  Potongan 2: "Fase 1: kerjakan C1 sampai C4 saja. Tes, komit, berhenti jika merah."
+  Potongan 3: "Fase 1: kerjakan C5 sampai C8 saja. Tes, komit."
+  Potongan 4: "Fase 1: kerjakan C9 sampai C15 saja. Tes, komit, tag core-v1."
+
+Jika limit habis atau model berganti, lanjutkan dengan:
+  "port resume, lalu lanjutkan potongan yang tersisa."
+Progres aman karena tiap tool dikomit. Jika diminta password sudo,
+ketik di terminal seperti biasa.
+
+---------------------------------------------------------------------
+LANGKAH 9 - CEK CORE
+---------------------------------------------------------------------
+Di terminal biasa (bukan di dalam OpenCode):
+  cd ~/port && source portkit/env.sh
+  portkit/bin/port doctor
+
+Agar bisa dipanggil sebagai `port`, tambahkan ke ~/.bashrc:
+  export PATH="$HOME/port/portkit/bin:$PATH"
+  source ~/.bashrc
+
+Semua baris harus OK (bagian platform bisa belum ada).
+
+---------------------------------------------------------------------
+LANGKAH 10 - BANGUN MODULE WII (SEKALI)
+---------------------------------------------------------------------
+Kirim ke OpenCode:
+  "Jalankan Fase P-WII saja. Tes tiap bagian, komit."
+Jika limit cepat habis, pecah: "Fase P-WII: detect dan extract saja",
+lalu "analyze dan check", lalu sisanya.
+
+Setelah selesai: `port platforms` harus menampilkan wii.
+(Xbox / Xbox 360 dibangun nanti saat dibutuhkan: "Jalankan Fase
+P-XBOX saja" atau "Fase P-X360 saja".)
+
+---------------------------------------------------------------------
+LANGKAH 11 - DUMP GAME MILIK SENDIRI
+---------------------------------------------------------------------
+- Perlu Wii yang sudah bisa homebrew + disc game asli milikmu.
+- Dump memakai aplikasi homebrew (misalnya CleanRip) ke USB/SD.
+- Pindahkan file ke FOLDER KHUSUS DUMP (~/port/dumps), nama file
+  bebas tapi sebaiknya mengandung judul game:
+    cp /media/$USER/<usb>/*.iso ~/port/dumps/
+- Cek isi folder: port dumps
+- Jangan unduh ISO dari internet dan jangan membagikan dump.
+
+---------------------------------------------------------------------
+LANGKAH 12 - GAME PERTAMA (LATIHAN)
+---------------------------------------------------------------------
+Mulai dari game kecil untuk menguji toolkit, baru Inazuma Eleven.
+
+  cd ~/port
+  port new "<nama game>" --track A
+  (cukup sebut nama game; disc dicari otomatis di ~/port/dumps.
+   Jika ada beberapa yang cocok, tool menampilkan daftar bernomor:
+   ulangi dengan --pick N.)
+  port analyze
+  port assets scan
+  port platform scaffold
+  port build pc && port run
+
+Target: jendela SDL2 muncul dengan test pattern.
+
+---------------------------------------------------------------------
+LANGKAH 13 - KERJA HARIAN
+---------------------------------------------------------------------
+  cd ~/port/games/wii/<GAME_ID>
+  opencode
+
+Kirim:
+  "port resume, lalu port loop 5 dan kerjakan. Berhenti setelah 5."
+
+Setiap sesi: mulai dengan `port resume`, akhiri dengan
+`port note "<1 kalimat>"`. Dengan model gratis, kecilkan jatah
+(port loop 2 atau 3) supaya satu sesi tidak terpotong limit.
+
+---------------------------------------------------------------------
+LANGKAH 14 - ANDROID
+---------------------------------------------------------------------
+Setelah build PC berjalan:
+1. Di HP: Pengaturan > Tentang ponsel > ketuk "Nomor build" 7 kali
+   > Opsi pengembang > aktifkan USB debugging.
+2. Sambungkan HP ke PC via USB, izinkan debugging di HP.
+3. Cek: adb devices   (HP harus terdaftar)
+4. Jalankan: port build android && port apk
+5. Lihat log: adb logcat | rg -i "<nama_app>" | head -50
+6. Aset: salin folder hasil ekstrak dari disc milikmu ke HP,
+   lalu arahkan aplikasi ke folder itu.
+
+---------------------------------------------------------------------
+LANGKAH 15 - BACKUP
+---------------------------------------------------------------------
+Buat repo Git PRIVAT di GitHub/GitLab untuk portkit dan kode game:
+  cd ~/port
+  git branch -M main
+  git remote add origin <url-repo-privat>
+  git push -u origin main
+.gitignore dari Langkah 4 sudah memblokir disc, executable, dan
+folder aset. Cek sebelum push: git status --short | head -30
+Hanya kode yang boleh masuk repo.
+
+---------------------------------------------------------------------
+TROUBLESHOOTING CEPAT
+---------------------------------------------------------------------
+- opencode tidak ditemukan  : restart terminal, cek PATH.
+- Model tidak muncul        : `opencode upgrade`, cek internet, lalu
+                              /models lagi. Daftar gratis bisa
+                              berubah: jalankan `zensync`.
+- "Rate limit exceeded"     : kuota gratis dipakai bersama banyak
+                              orang. Tunggu beberapa menit, atau
+                              pastikan fallback aktif (Langkah 6).
+- "model not found"         : model gratis sudah dicabut. Jalankan
+                              `zensync` untuk memperbarui rantai.
+- Fallback tidak jalan      : buka ~/.config/opencode/opencode.json,
+                              cek ID di mappings sama persis dengan
+                              /models; restart OpenCode.
+- zensync gagal             : internet/format respons berubah; config
+                              lama aman. Pilih manual lewat /models.
+- API key ditolak           : hanya berlaku jika memakai Go/Zen
+                              berbayar; salin ulang key-nya.
+- Limit habis               : berhenti, lanjut nanti dengan
+                              `port resume`; progres aman di Git.
+- Model gratis salah terus  : perkecil tugas (satu tool / satu
+                              fungsi per pesan) atau pertimbangkan
+                              model berbayar nanti (/connect).
+- Download tool gagal       : cari rilis resmi di GitHub/situs proyek;
+                              jangan pakai mirror tidak jelas.
+- Build error berulang      : maksimal 3 percobaan, lalu
+                              `port skip <id> "<alasan>"`.
+- Kehabisan disk            : hapus folder build/ dan cache lama.
+
+---------------------------------------------------------------------
+RINGKASAN URUTAN
+---------------------------------------------------------------------
+ 0. Cek PC            6. Config model otomatis   11. Dump game
+ 1. Update + paket    7. Cek model               12. Game pertama
+ 2. Info model gratis 8. Core (per potongan)     13. Kerja harian
+ 3. Install opencode  9. port doctor             14. Android
+ 4. Folder+.gitignore 10. Module Wii             15. Backup
+ 5. Pasang otak
+Core dan module platform dibuat SEKALI. Game berikutnya mulai
+langsung dari `port new`.
+=====================================================================

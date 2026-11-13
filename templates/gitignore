@@ -1,0 +1,16 @@
+dumps/
+tools/
+.venv/
+*.iso
+*.rvz
+*.wbfs
+*.ciso
+*.gcm
+*.dol
+*.rel
+*.xbe
+*.xex
+games/*/*/orig/
+games/*/*/extract/
+games/*/*/assets/
+games/*/*/build/
